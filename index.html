@@ -1021,10 +1021,12 @@ function PendencyAnalysis({pen, mj, fgjm, bare, cfg, onMakePlan}){
   const [view,setView]=useState("customer");
   const [sortKey,setSortKey]=useState("rolls");
   const [sortDir,setSortDir]=useState(-1);
-  const [selGroups,setSelGroups]=useState(new Set()); // selected film type keys
-  const toggleGroup=(key)=>setSelGroups(s=>{const n=new Set(s);n.has(key)?n.delete(key):n.add(key);return n;});
-  const selAll=()=>setSelGroups(new Set((filmData||[]).map(function(f){return f.key;})));
-  const selNone=()=>setSelGroups(new Set());
+  const [selGroups,setSelGroups]=useState([]); // selected film type keys as array
+  const toggleGroup=(key)=>{
+    setSelGroups(function(s){ return s.indexOf(key)>=0?s.filter(function(k){return k!==key;}):[...s,key]; });
+  };
+  const selAll=(fdata)=>setSelGroups((fdata||[]).map(function(f){return f.key;}));
+  const selNone=()=>setSelGroups([]);
   const pend=useMemo(()=>pen.filter(r=>r.Material&&(toInt(r["Pending Rolls"])>0||toFloat(r["Pending Rolls"])>0)),[pen]);
 
   const OD_COMPAT={"22":["22","25","28"],"25":["25","28"],"28":["28"]};
@@ -1243,42 +1245,38 @@ function PendencyAnalysis({pen, mj, fgjm, bare, cfg, onMakePlan}){
         <div>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
             <div style={{flex:1,fontSize:12,color:C.textMd,fontWeight:600}}>
-              {selGroups.size===0?"Tip: Click cards to select film types for planning — or leave all unselected to plan everything":(selGroups.size+" film type"+(selGroups.size>1?"s":"")+" selected")}
+              {selGroups.length===0?"Click cards to select film types, or plan everything":selGroups.length+" film type(s) selected for planning"}
             </div>
-            <button onClick={(e)=>{e.stopPropagation();selAll();}} style={{...btn(C.navy,"#fff",{padding:"5px 12px",fontSize:11})}}>☑ Select All</button>
-            <button onClick={(e)=>{e.stopPropagation();selNone();}} style={{...btn("#f1f5f9",C.navy,{padding:"5px 12px",fontSize:11,border:"1px solid "+C.border})}}>☐ Clear</button>
+            <button onClick={function(e){e.stopPropagation();selAll(filmData);}} style={{...btn(C.navy,"#fff",{padding:"5px 12px",fontSize:11})}}>Select All</button>
+            <button onClick={function(e){e.stopPropagation();selNone();}} style={{...btn("#f1f5f9",C.navy,{padding:"5px 12px",fontSize:11,border:"1px solid "+C.border})}}>Clear</button>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
           {filmData.map((f,i)=>{
             const odColors={"22":["#f0fdf4","#15803d","#86efac"],"25":["#eff6ff","#1e40af","#93c5fd"],"28":["#fff7ed","#92400e","#fdba74"]};
             const [bg,tc,bc]=odColors[f.od]||["#f8fafc","#64748b","#cbd5e1"];
-            const isSel=selGroups.has(f.key)||selGroups.size===0;
-            const isChk=selGroups.has(f.key);
+            const isChk=selGroups.indexOf(f.key)>=0;
             return(
-              <div key={i} onClick={()=>toggleGroup(f.key)} style={{...card({padding:16,borderColor:isChk?tc:bc,borderWidth:isChk?3:2,cursor:"pointer",background:isChk?bg:"#fff",boxShadow:isChk?`0 4px 18px ${bc}55`:"none",transition:"all .15s"})}}>
-                {/* Checkbox row */}
-                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-                  <div style={{width:22,height:22,borderRadius:6,border:`2px solid ${isChk?tc:C.border}`,background:isChk?tc:"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
-                    {isChk&&<span style={{color:"#fff",fontSize:14,fontWeight:900,lineHeight:1}}>✓</span>}
+              <div key={i} onClick={function(){toggleGroup(f.key);}} style={{...card({padding:16,borderColor:isChk?tc:bc,borderWidth:isChk?3:2,cursor:"pointer",background:isChk?bg:"#fff"})}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                  <div style={{width:20,height:20,borderRadius:5,border:"2px solid "+(isChk?tc:"#cbd5e1"),background:isChk?tc:"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                    {isChk&&<span style={{color:"#fff",fontSize:13,fontWeight:900}}>✓</span>}
                   </div>
-                  <div style={{flex:1,display:"flex",alignItems:"center",gap:6}}>
-                    <span style={{background:isChk?tc:bg,color:isChk?"#fff":tc,border:`1px solid ${bc}`,padding:"3px 10px",borderRadius:20,fontWeight:800,fontSize:15,transition:"all .15s"}}>{f.thick}µ</span>
-                    <span style={{background:isChk?tc:bg,color:isChk?"#fff":tc,border:`1px solid ${bc}`,padding:"3px 10px",borderRadius:20,fontWeight:700,fontSize:12,transition:"all .15s"}}>{f.od==="22"?"2.2 OD":f.od==="25"?"2.5 OD":"2.8 OD"}</span>
-                  </div>
-                  <div style={{textAlign:"right"}}>
+                  <span style={{background:bg,color:tc,border:"1px solid "+bc,padding:"3px 10px",borderRadius:20,fontWeight:800,fontSize:14}}>{f.thick}µ</span>
+                  <span style={{background:bg,color:tc,border:"1px solid "+bc,padding:"3px 10px",borderRadius:20,fontWeight:700,fontSize:12}}>{f.od==="22"?"2.2 OD":f.od==="25"?"2.5 OD":"2.8 OD"}</span>
+                  <div style={{marginLeft:"auto",textAlign:"right"}}>
                     <div style={{fontSize:20,fontWeight:800,color:isChk?tc:C.red}}>{Math.round(f.rolls)}</div>
                     <div style={{fontSize:9,color:C.textLt}}>rolls</div>
                   </div>
                 </div>
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:isChk?tc:C.textMd,marginBottom:6}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.textMd,marginBottom:6}}>
                   <span>{f.orders} orders</span>
                   <span>{(f.kg/1000).toFixed(2)} MT</span>
                   <span>{f.customers.length} customers</span>
                 </div>
-                <div style={{fontSize:10,color:isChk?tc:C.textLt,marginBottom:isChk?8:0}}>
-                  Widths: {f.widths.slice(0,5).join(", ")}{f.widths.length>5?`... +${f.widths.length-5}`:""} mm
+                <div style={{fontSize:10,color:C.textLt}}>
+                  Widths: {f.widths.slice(0,5).join(", ")}{f.widths.length>5?" +more":""} mm
                 </div>
-                {isChk&&<div style={{marginTop:6,padding:"4px 10px",background:"rgba(0,0,0,.06)",borderRadius:6,fontSize:10,fontWeight:700,color:tc,textAlign:"center"}}>✓ Selected for planning</div>}
+                {isChk&&<div style={{marginTop:6,padding:"3px 8px",background:"rgba(0,0,0,.06)",borderRadius:5,fontSize:10,fontWeight:700,color:tc,textAlign:"center"}}>Selected for planning</div>}
               </div>
             );
           })}
@@ -1331,15 +1329,117 @@ function PendencyAnalysis({pen, mj, fgjm, bare, cfg, onMakePlan}){
       <div style={{marginTop:18,padding:"14px 18px",background:"linear-gradient(135deg,#0f1e3a,#1a305c)",borderRadius:14,display:"flex",alignItems:"center",gap:16,flexWrap:"wrap",border:"1px solid rgba(251,191,36,.2)"}}>
         <div><div style={{color:"#fff",fontWeight:800,fontSize:14}}>Ready to plan?</div><div style={{color:"rgba(255,255,255,.45)",fontSize:12}}>Generate MET/F/04 plan in 3 machine configurations</div></div>
         <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
-          {selGroups.size>0&&<div style={{fontSize:11,color:"#fbbf24",fontWeight:700}}>Planning {selGroups.size} selected film type{selGroups.size>1?"s":""} · {Array.from(selGroups).join(", ")}</div>}
-          {selGroups.size===0&&<div style={{fontSize:11,color:"rgba(255,255,255,.5)"}}>No selection → all {filmData.length} film types will be planned</div>}
-          <button onClick={()=>onMakePlan(selGroups.size>0?selGroups:null)} style={{...btn("linear-gradient(135deg,#fde68a,#fbbf24)","#1a0a00",{fontWeight:900,padding:"12px 28px",fontSize:14,boxShadow:"0 4px 14px rgba(251,191,36,.4)"})}}>📋 Make MET/F/04 Plan →</button>
+          {selGroups.length>0&&<div style={{fontSize:11,color:"#fbbf24",fontWeight:700}}>{selGroups.length} film type(s) selected</div>}
+          {selGroups.length===0&&<div style={{fontSize:11,color:"rgba(255,255,255,.5)"}}>No selection: all film types will be planned</div>}
+          <button onClick={function(){onMakePlan(selGroups.length>0?selGroups:null);}} style={{...btn("linear-gradient(135deg,#fde68a,#fbbf24)","#1a0a00",{fontWeight:900,padding:"12px 28px",fontSize:14,boxShadow:"0 4px 14px rgba(251,191,36,.4)"})}}>Make MET/F/04 Plan</button>
         </div>
       </div>
     </div>
   );
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MET/F/05 — BARE FILM SLITTING PLAN GENERATOR
+// Converts MET/F/04 bare rows into Primary Slitter plan
+// Rule: Same base material (ignoring OD suffix M22/M25/M28) can share one row
+// Input bare film (10200mm wide) is slit into 3-4 metallizer-width jumbos
+// ─────────────────────────────────────────────────────────────────────────────
+function generateF05Plan(bareRows, cfg){
+  const JUMBO_W = cfg.primarySlitWidth || 10200; // default bare film roll width
+  const JUMBO_L = cfg.jumboLen || 73000;
+  const MIN_SCRAP = 500; // minimum 5-grade scrap width
+  const MAX_ROLLS_PER_ROW = 4;
+
+  // Base material = strip last M\d{2} and anything after it
+  function baseMat(mat){
+    return String(mat||"").replace(/M\d{2}.*$/, "");
+  }
+
+  // Group all needed roll widths by base material
+  // Each MET/F/04 BARE row has: rollSize (the jumbo width needed) × sets count
+  const groups = {};
+  for(const r of bareRows){
+    if(!r.rollSize || !r.sets) continue;
+    const bm = baseMat(r.material || "");
+    if(!groups[bm]) groups[bm] = {
+      baseMat: bm,
+      rolls: [],      // list of {width, customer, metPlan}
+      customer: r.customers || "GLS",
+    };
+    // Add one entry per set (each set = one jumbo that needs to be metallized)
+    for(let i=0; i<(r.sets||1); i++){
+      groups[bm].rolls.push({
+        width: r.rollSize,
+        customer: r.customers || "GLS"
+      });
+    }
+  }
+
+  const f05Rows = [];
+  let rowSeq = 0;
+
+  for(const [bm, grp] of Object.entries(groups)){
+    // Sort rolls by width descending (largest first → better packing)
+    const pending = [...grp.rolls].sort((a,b) => b.width - a.width);
+
+    while(pending.length > 0){
+      rowSeq++;
+      const selected = [];
+      let usedW = 0;
+
+      // Greedy pack: add rolls until machine width is full or 4 rolls
+      for(let idx = 0; idx < pending.length && selected.length < MAX_ROLLS_PER_ROW; idx++){
+        const roll = pending[idx];
+        // Check if roll fits with at least MIN_SCRAP left (if not last roll)
+        const wouldUse = usedW + roll.width;
+        const spaceLeft = JUMBO_W - wouldUse;
+        if(spaceLeft >= 0 && (spaceLeft === 0 || spaceLeft >= MIN_SCRAP || selected.length === 0)){
+          selected.push({...roll, _idx: idx});
+          usedW += roll.width;
+        }
+      }
+
+      if(selected.length === 0){
+        // Force at least one roll
+        selected.push({...pending[0], _idx: 0});
+        usedW = pending[0].width;
+      }
+
+      // Remove selected from pending (reverse order to preserve indices)
+      const usedIdxs = new Set(selected.map(s => s._idx));
+      for(let i = pending.length-1; i >= 0; i--){
+        if(usedIdxs.has(i)) pending.splice(i, 1);
+      }
+
+      const rollWidths = selected.map(s => s.width);
+      const totalRolls = rollWidths.reduce((a,b) => a+b, 0);
+      const remaining = JUMBO_W - totalRolls;
+
+      // 5 Grade: scrap if there's meaningful remaining space
+      const fiveGrade = remaining > MIN_SCRAP ? (remaining - 5) : (remaining > 0 ? remaining : 0);
+      const trim = JUMBO_W - totalRolls - fiveGrade;
+
+      // Customer = most common in selected
+      const custCounts = {};
+      selected.forEach(s => { custCounts[s.customer] = (custCounts[s.customer]||0)+1; });
+      const mainCust = Object.entries(custCounts).sort((a,b)=>b[1]-a[1])[0]?.[0] || "GLS";
+
+      f05Rows.push({
+        seq: rowSeq,
+        material: bm,
+        length: JUMBO_L,
+        rolls: rollWidths,
+        fiveGrade: fiveGrade > 0 ? fiveGrade : null,
+        trim: trim,
+        jumboWidth: JUMBO_W,
+        customer: mainCust,
+      });
+    }
+  }
+
+  return f05Rows;
+}
 // ─────────────────────────────────────────────────────────────────────────────
 // PLAN BUILDER — 3 MACHINE MODES + MANUAL PRIORITY
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1355,14 +1455,14 @@ function PlanBuilderNew({pen, mj, fgjm, bare, cfg, metPlan, setMetPlan, onViewSe
 
   const pend=pen.filter(r=>r.Material&&(toInt(r["Pending Rolls"])>0||toFloat(r["Pending Rolls"])>0));
   // Apply planFilter: only include orders whose film type key is selected
-  const filteredPen=planFilter&&planFilter.size>0?pend.filter(o=>{
+  const filteredPen=(planFilter&&planFilter.length>0)?pend.filter(function(o){
     const th=toFloat(o.Thickness)||"?";
     const op=parseMat(String(o.Material||""));
-    const od=op.od?`${op.od==="22"?"2.2":op.od==="25"?"2.5":"2.8"} OD`:"? OD";
-    const key=`${th}µ · ${od}`;
-    return planFilter.has(key);
+    const odLabel=op.od==="22"?"2.2":op.od==="25"?"2.5":"2.8";
+    const key=th+"µ · "+odLabel+" OD";
+    return planFilter.indexOf(key)>=0;
   }):pend;
-  const filterInfo=planFilter&&planFilter.size>0?(planFilter.size+" film type"+(planFilter.size>1?"s":"")+" selected"):"All film types";
+  const filterInfo=(planFilter&&planFilter.length>0)?(planFilter.length+" film type(s) selected"):"All film types";
   const today=new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"2-digit",year:"numeric"});
 
   const generate=()=>{
@@ -1423,6 +1523,7 @@ function PlanBuilderNew({pen, mj, fgjm, bare, cfg, metPlan, setMetPlan, onViewSe
   const fgjmRows=planRows?.filter(r=>r.source==="FGJM")||[];
   const mjRows=planRows?.filter(r=>r.source==="MJ")||[];
   const bareRows=planRows?.filter(r=>r.source==="BARE")||[];
+  const f05Rows=generateF05Plan(bareRows, cfg);
 
   const TH2={background:"#1a305c",color:"#fff",padding:"7px 8px",textAlign:"center",fontSize:11,fontWeight:700,border:"1px solid #2d4a7a",whiteSpace:"nowrap"};
   const TD2={padding:"6px 8px",fontSize:11,color:"#1a1a2e",border:"1px solid #cdd5e0",whiteSpace:"nowrap",verticalAlign:"middle"};
@@ -1518,6 +1619,37 @@ function PlanBuilderNew({pen, mj, fgjm, bare, cfg, metPlan, setMetPlan, onViewSe
       w.document.close();
     };
 
+    const printF05=function(){
+      const w2=window.open("","_blank");
+      const today2=new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"2-digit",year:"numeric"});
+      const rowsHtml2=f05Rows.map(function(r,i){
+        const rollCells=[0,1,2,3].map(function(j){ return r.rolls[j]?"<td style='text-align:center;font-weight:800;color:#1e40af'>"+r.rolls[j]+"</td>":"<td style='color:#ccc'>-</td>"; }).join("");
+        return "<tr style='background:"+(i%2?"#f0fdf4":"#fff")+"'>"
+          +"<td style='text-align:center;font-weight:700'>"+(i+1)+"</td>"
+          +"<td style='font-family:monospace;font-size:9px;font-weight:800'>"+String(r.material||"").replace(/M\d{2}.*$/,"")+"</td>"
+          +"<td style='text-align:center'>"+r.length+"</td>"
+          +rollCells
+          +"<td style='text-align:center;color:#92400e;font-weight:700'>"+(r.fiveGrade||"-")+"</td>"
+          +"<td style='text-align:center;color:#dc2626;font-weight:800'>"+r.trim+"</td>"
+          +"<td style='text-align:center;font-weight:800;color:#14532d'>"+r.jumboWidth+"</td>"
+          +"<td style='font-size:9px'>"+String(r.customer||"").slice(0,20)+"</td>"
+          +"</tr>";
+      }).join("");
+      const html2="<!DOCTYPE html><html><head><title>GLS/MET/F/05</title>"
+        +"<style>body{font-family:Arial,sans-serif;font-size:9px;margin:8mm;}table{width:100%;border-collapse:collapse;font-size:9px;}th,td{border:1px solid #999;padding:3px 5px;}th{background:#14532d;color:#fff;text-align:center;}</style>"
+        +"</head><body>"
+        +"<b style='font-size:12px'>GLS POLYFILMS PVT. LTD., GURAWARA, REWARI</b>"
+        +"<div style='font-size:8px;margin:2px 0'>Slitting of Base Film Roll &nbsp;|&nbsp; Doc. No.: GLS/MET/F/05 &nbsp;|&nbsp; Date: "+today2+" &nbsp;|&nbsp; Plan No: "+bareNo+"</div>"
+        +"<div style='font-size:8px;margin-bottom:5px'>All Rolls Chemical Surface Outside</div>"
+        +"<table><thead><tr><th>Sr.</th><th>Material</th><th>Length</th><th>Roll 1</th><th>Roll 2</th><th>Roll 3</th><th>Roll 4</th><th>5 Grade</th><th>Trim</th><th>Jumbo Width</th><th>Customer</th></tr></thead>"
+        +"<tbody>"+rowsHtml2+"</tbody></table>"
+        +"<p style='font-size:8px;margin-top:6px;color:#555'>Met Feed ka First Jumbo, Slit Only in G301 Material | Bold Written Size is Extra Slit</p>"
+        +"<scr"+"ipt>window.onload=function(){window.print()};</scr"+"ipt>"
+        +"</body></html>";
+      w2.document.write(html2);
+      w2.document.close();
+    };
+
     // Material colour helpers
     const matColor=(mat)=>{
       const s=String(mat||"");
@@ -1589,9 +1721,10 @@ function PlanBuilderNew({pen, mj, fgjm, bare, cfg, metPlan, setMetPlan, onViewSe
           {/* Tab switcher */}
           <div style={{display:"flex",gap:0,borderBottom:"2px solid #dde3ed"}}>
             {[
-              {id:"MET",label:`🔥 Metallization Plan (${bareRows.length} runs)`},
-              {id:"MJ", label:`✂ MJ Slit (${mjRows.length})`},
-              {id:"FGJM",label:`✅ Direct Dispatch (${fgjmRows.length})`},
+              {id:"MET",label:"🔥 Met Plan ("+bareRows.length+" runs)"},
+              {id:"MJ", label:"✂ MJ Slit ("+mjRows.length+")"},
+              {id:"FGJM",label:"✅ Direct ("+fgjmRows.length+")"},
+              {id:"F05",label:"📄 Bare Feed MET/F/05 ("+f05Rows.length+")"},
             ].map(t=>(
               <button key={t.id} onClick={()=>setModalTab(t.id)} style={{padding:"10px 18px",background:modalTab===t.id?"#fff":"transparent",border:"none",borderBottom:modalTab===t.id?"2px solid #1a305c":"2px solid transparent",cursor:"pointer",fontWeight:700,fontSize:12,color:modalTab===t.id?C.navy:"#4b5a6e",fontFamily:"inherit",marginBottom:-2}}>
                 {t.label}
@@ -1718,6 +1851,92 @@ function PlanBuilderNew({pen, mj, fgjm, bare, cfg, metPlan, setMetPlan, onViewSe
               </table>
             )}
 
+
+            {/* ═══ MET/F/05 — BARE FILM SLITTING PLAN ═══ */}
+            {modalTab==="F05"&&(
+              <div>
+                {/* F05 Header Info */}
+                <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:12,color:"#14532d"}}>
+                  <b>GLS/MET/F/05 — Slitting of Base Film Roll</b>
+                  &nbsp;·&nbsp; All Rolls Chemical Surface Outside
+                  &nbsp;·&nbsp; <b>{f05Rows.length} slitting rows</b> from {bareRows.length} Met runs
+                  <br/>
+                  <span style={{color:"#166534",fontSize:11,marginTop:4,display:"block"}}>
+                    This plan tells Primary Slitter how to slit wide bare film into narrower rolls for metallization.
+                    Bare film roll width: <b>{(cfg.primarySlitWidth||10200)}mm</b>
+                  </span>
+                </div>
+
+                {f05Rows.length===0
+                  ?<div style={{padding:40,textAlign:"center",color:C.textMd,fontSize:14}}>No MET/F/04 runs to generate F05 plan from</div>
+                  :<div>
+                    {/* Slit Status Summary */}
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+                      {(function(){
+                        const widthCounts={};
+                        f05Rows.forEach(function(r){ r.rolls.forEach(function(w){ widthCounts[w]=(widthCounts[w]||0)+1; }); });
+                        return Object.entries(widthCounts).sort(function(a,b){return b[0]-a[0];}).map(function(en,i){
+                          return(
+                            <span key={i} style={{background:"#eff6ff",color:"#1e40af",border:"1px solid #93c5fd",padding:"3px 10px",borderRadius:12,fontSize:11,fontWeight:700}}>
+                              {en[0]}mm × {en[1]}
+                            </span>
+                          );
+                        });
+                      })()}
+                    </div>
+
+                    <table style={{width:"100%",borderCollapse:"collapse",minWidth:700}}>
+                      <thead>
+                        <tr>
+                          <th style={{...TH2,background:"#14532d"}}>Sr.</th>
+                          <th style={{...TH2,background:"#14532d",minWidth:130}}>Material (Base Film)</th>
+                          <th style={{...TH2,background:"#14532d"}}>Length (m)</th>
+                          <th style={{...TH2,background:"#14532d",background:"#1e40af"}}>Roll 1</th>
+                          <th style={{...TH2,background:"#14532d",background:"#1e40af"}}>Roll 2</th>
+                          <th style={{...TH2,background:"#14532d",background:"#1e40af"}}>Roll 3</th>
+                          <th style={{...TH2,background:"#14532d",background:"#1e40af"}}>Roll 4</th>
+                          <th style={{...TH2,background:"#92400e"}}>5 Grade</th>
+                          <th style={{...TH2,background:"#dc2626"}}>Trim</th>
+                          <th style={{...TH2,background:"#14532d"}}>Jumbo Width</th>
+                          <th style={{...TH2,background:"#14532d"}}>Customer</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {f05Rows.map(function(r,i){
+                          const rowBg=i%2===0?"#f0fdf4":"#fff";
+                          const matBase=String(r.material||"").replace(/M\d{2}.*$/,"");
+                          return(
+                            <tr key={i} style={{background:rowBg}}>
+                              <td style={{...TDc,fontWeight:700,color:"#14532d"}}>{i+1}</td>
+                              <td style={{...TD2,fontFamily:"monospace",fontSize:12,fontWeight:800,color:matColor(matBase+"M22"),background:matBg(matBase+"M22")}}>{matBase}</td>
+                              <td style={TDc}>{r.length}</td>
+                              {[0,1,2,3].map(function(j){
+                                return(
+                                  <td key={j} style={{...TDc,fontWeight:r.rolls[j]?800:400,color:r.rolls[j]?"#1e40af":"#cbd5e1",background:r.rolls[j]?"#eff6ff":"#f8fafc",fontSize:r.rolls[j]?13:11}}>
+                                    {r.rolls[j]||"-"}
+                                  </td>
+                                );
+                              })}
+                              <td style={{...TDc,color:r.fiveGrade?"#92400e":"#cbd5e1",fontWeight:r.fiveGrade?700:400,background:r.fiveGrade?"#fff7ed":"#f8fafc"}}>{r.fiveGrade||"-"}</td>
+                              <td style={{...TDc,color:"#dc2626",fontWeight:700,background:"#fff1f2"}}>{r.trim}</td>
+                              <td style={{...TDc,fontWeight:800,color:"#14532d"}}>{r.jumboWidth}</td>
+                              <td style={{...TD2,fontSize:11,maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.customer}</td>
+                            </tr>
+                          );
+                        })}
+                        {/* Totals */}
+                        <tr style={{background:"#14532d"}}>
+                          <td colSpan={3} style={{...TD2,color:"#fff",fontWeight:800,background:"#14532d",textAlign:"right"}}>TOTAL SLITTING ROWS:</td>
+                          <td colSpan={8} style={{...TD2,color:"#86efac",fontWeight:800,background:"#14532d"}}>
+                            {f05Rows.length} rows · {f05Rows.reduce(function(s,r){return s+r.rolls.length;},0)} total rolls · {(cfg.primarySlitWidth||10200)}mm bare film width
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                }
+              </div>
+            )}
           </div>{/* end padding div */}
 
           {/* Footer */}
@@ -1725,7 +1944,8 @@ function PlanBuilderNew({pen, mj, fgjm, bare, cfg, metPlan, setMetPlan, onViewSe
             <div style={{fontSize:12,color:"#4b5a6e",flex:1}}>
               Plan Power · Auto-generated · {today} · {bareRows.length} Met runs · {mjRows.length} MJ slit · {fgjmRows.length} direct
             </div>
-            <button onClick={printPlan} style={{...btn("#1a305c","#fff",{padding:"8px 18px",fontSize:12})}}>🖨 Print MET/F/04</button>
+            <button onClick={printF05} style={{...btn("#14532d","#fff",{padding:"8px 18px",fontSize:12})}}>🖨 Print F05</button>
+            <button onClick={printPlan} style={{...btn("#1a305c","#fff",{padding:"8px 18px",fontSize:12})}}>🖨 Print F04/F/04</button>
             <button onClick={()=>{setShowModal(false);onViewSeq();}} style={{...btn("#6d28d9","#fff",{padding:"8px 18px",fontSize:12})}}>⚙ Met Sequence →</button>
           </div>
 
@@ -1838,7 +2058,7 @@ function App(){
   const [data,setData]=useState({pen:[],mj:[],fgjm:[],bare:[]});
   const [busy,setBusy]=useState("");
   const [metPlan,setMetPlan]=useState([]);
-  const [planFilter,setPlanFilter]=useState(null); // null=all, else Set of groupKeys
+  const [planFilter,setPlanFilter]=useState([]);
   const [metView,setMetView]=useState("M-1");
   const [expandedSet,setExpanded]=useState({});
   const [showAdmin,setShowAdmin]=useState(false);
@@ -2000,7 +2220,7 @@ function App(){
           {tab==="analysis"&&data.pen.length>0&&(
             <PendencyAnalysis
               pen={data.pen} mj={data.mj} fgjm={data.fgjm} bare={data.bare} cfg={cfg}
-              onMakePlan={(filter)=>{setPlanFilter(filter);setTab("plan");}}/>
+              onMakePlan={function(filter){setPlanFilter(filter||[]);setTab("plan");}}/>
           )}
 
           {/* ── PLAN BUILDER TAB ── */}
