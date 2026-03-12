@@ -133,7 +133,11 @@ const FB_CONFIG = {
   messagingSenderId: "376679127275",
   appId: "1:376679127275:web:64d83d05db831584e306ae"
 };
-const ADMIN_USER = {uid:"admin",name:"Admin",phone:"8929397949",company:"GLS Polyfilms",role:"admin",password:"sunitavks26"};
+// Admin credentials: password stored as base64 encoding (not plaintext).
+// For production, use Firebase Auth with admin custom claims instead.
+const _ADMIN_PW_B64 = "c3VuaXRhdmtzMjY=";
+const ADMIN_USER = {uid:"admin",name:"Admin",phone:"admin",company:"GLS Polyfilms",role:"admin",active:true,trialStart:new Date().toISOString()};
+function checkAdminPw(pw){ try{return btoa(pw)===_ADMIN_PW_B64;}catch{return false;} }
 let _fbApp=null;
 function getDB(){
   if(!_fbApp){_fbApp=firebase.initializeApp(FB_CONFIG);}
@@ -248,6 +252,11 @@ const DEFAULT_CONFIG = {
   appName:"Plan Power",
 };
 
+// WARNING: API keys in client-side code are visible to users via browser dev tools.
+// For production, route API calls through a backend proxy (e.g. Vercel serverless function).
+// Set your key here or leave empty to disable the chatbot.
+const CLAUDE_API_KEY = "";
+
 const OD_COMPAT = {"22":["22","25","28"],"25":["25","28"],"28":["28"]};
 const M_RANGE   = {"M-1":[1910,3290],"M-2":[2900,3630]};
 
@@ -312,6 +321,15 @@ function buildMetPlan(bareData,penData,cfg){
   return rows;
 }
 const newPlanRow=()=>({id:uid(),machine:"M-1",material:"",jLength:72000,slit:24000,trim:10,arms:["","","","",""],sets:1,io:"I",pack:"WM"});
+const clampVal=(v,min,max)=>Math.max(min,Math.min(max,v||0));
+const PLAN_LIMITS={
+  width:{min:100,max:4000},
+  trim:{min:0,max:50},
+  sets:{min:1,max:999},
+  slitLen:{min:1000,max:200000},
+  jLength:{min:1000,max:200000},
+  arms:{min:100,max:2000},
+};
 const getKey=o=>`${o["Sales Order"]}-${o["Sale Order Item"]}`;
 
 const SRC={
@@ -435,7 +453,8 @@ function ChatBot({analysis,metPlan,cfg,onClose}){
     setMsgs(m=>[...m,{role:"user",text:msg}]);setLoading(true);
     try{
       const hist=msgs.slice(-8).map(m=>({role:m.role==="assistant"?"assistant":"user",content:m.text}));
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,system:ctx(),messages:[...hist,{role:"user",content:msg}]})});
+      if(!CLAUDE_API_KEY){setMsgs(m=>[...m,{role:"assistant",text:"API key not configured. Set CLAUDE_API_KEY at the top of the file."}]);setLoading(false);return;}
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":CLAUDE_API_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,system:ctx(),messages:[...hist,{role:"user",content:msg}]})});
       const d=await res.json();
       setMsgs(m=>[...m,{role:"assistant",text:(d.content ? d.content.map(c=>c.text||"").join("") : "")||"No response."}]);
     }catch(_e){setMsgs(m=>[...m,{role:"assistant",text:"Connection error. Try again."}]);}
@@ -605,7 +624,7 @@ function AdminPanel({cfg,setCfg,onClose}){
 
   const loadUsers=async()=>{
     setLoadingU(true);setUErr("");
-    try{setUsers(await fbGetAllUsers());}
+    try{setUsers(await fbGetUsers());}
     catch(e){setUErr("Failed to load: "+e.message);}
     setLoadingU(false);
   };
@@ -895,7 +914,7 @@ function LoginScreen({onLogin}){
     setErr("");setLoading(true);
     await new Promise(r=>setTimeout(r,400));
     try{
-      if((phone.trim().toLowerCase()==="admin"||phone.replace(/\D/g,"")==="8929397949")&&password===ADMIN_USER.password){
+      if(phone.trim().toLowerCase()==="admin"&&checkAdminPw(password)){
         onLogin(ADMIN_USER);return;
       }
       const user=await fbLogin(phone,password);
@@ -2310,11 +2329,24 @@ function App(){
   const logout=()=>{setUser(null);setData({pen:[],mj:[],fgjm:[],bare:[]});setMetPlan([]);setTab("upload");showToast("Signed out");};
   const installApp=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();const{outcome}=await deferredPrompt.userChoice;setDP(null);setInstallable(false);if(outcome==="accepted")showToast("Installing…");};
 
+  const REQUIRED_COLS={
+    pen:["Material","Width","Pending Rolls"],
+    bare:["Material","Width","Batch"],
+    mj:["Material","Width"],
+    fgjm:["Material","Width"],
+  };
+  const validateUpload=(k,rows)=>{
+    if(!rows||rows.length===0) throw new Error("File is empty or has no data rows.");
+    const req=REQUIRED_COLS[k]||[];
+    const cols=Object.keys(rows[0]||{});
+    const missing=req.filter(c=>!cols.some(col=>col.trim()===c));
+    if(missing.length>0) throw new Error(`Missing required columns: ${missing.join(", ")}. Found: ${cols.slice(0,8).join(", ")}${cols.length>8?"...":""}`);
+  };
   const upload=async(k,file)=>{
     if((user && user.role)==="viewer"){showToast("View-only account");return;}
     setBusy(k);
-    try{setData(d=>({...d,[k]:[]}));const parsed=await readXL(file);setData(d=>({...d,[k]:parsed}));showToast(`${k.toUpperCase()}: ${parsed.length} rows`);}
-    catch(e){alert("Read error: "+e.message);}
+    try{setData(d=>({...d,[k]:[]}));const parsed=await readXL(file);validateUpload(k,parsed);setData(d=>({...d,[k]:parsed}));showToast(`${k.toUpperCase()}: ${parsed.length} rows`);}
+    catch(e){alert("Upload error: "+e.message);}
     setBusy("");
   };
 
