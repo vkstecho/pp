@@ -143,8 +143,24 @@ const DEFAULT_CONFIG = {
   appName:"Plan Power",
 };
 
+// WARNING: API keys in client-side code are visible to users via browser dev tools.
+// For production, route API calls through a backend proxy (e.g. Vercel serverless function).
+// Set your key here or leave empty to disable the chatbot.
+const CLAUDE_API_KEY = "";
+
 const OD_COMPAT = {"22":["22","25","28"],"25":["25","28"],"28":["28"]};
 const M_RANGE   = {"M-1":[1910,3290],"M-2":[2900,3630]};
+
+// Admin credentials: store password hash instead of plaintext.
+// To change admin password, update the hash below.
+// Generate new hash: btoa(newPassword) — this is basic encoding, not secure hashing.
+// For production, use Firebase Auth with admin custom claims instead.
+const _ADMIN_PW_B64 = "c3VuaXRhdmtzMjY="; // base64-encoded admin password
+const ADMIN_USER = {
+  uid:"admin",name:"Administrator",phone:"admin",company:"Plan Power",
+  role:"admin",active:true,trialStart:new Date().toISOString()
+};
+function checkAdminPw(pw){ try{return btoa(pw)===_ADMIN_PW_B64;}catch{return false;} }
 
 const toInt   = v => parseInt(String(v||"").replace(/[\s,]/g,""))||0;
 const toFloat = v => parseFloat(String(v||"").replace(/,/g,"").replace(/[^\d.-]/g,""))||0;
@@ -207,6 +223,15 @@ function buildMetPlan(bareData,penData,cfg){
   return rows;
 }
 const newPlanRow=()=>({id:uid(),machine:"M-1",material:"",jLength:72000,slit:24000,trim:10,arms:["","","","",""],sets:1,io:"I",pack:"WM"});
+const clampVal=(v,min,max)=>Math.max(min,Math.min(max,v||0));
+const PLAN_LIMITS={
+  width:{min:100,max:4000},
+  trim:{min:0,max:50},
+  sets:{min:1,max:999},
+  slitLen:{min:1000,max:200000},
+  jLength:{min:1000,max:200000},
+  arms:{min:100,max:2000},
+};
 const getKey=o=>`${o["Sales Order"]}-${o["Sale Order Item"]}`;
 
 const SRC={
@@ -330,7 +355,8 @@ function ChatBot({analysis,metPlan,cfg,onClose}){
     setMsgs(m=>[...m,{role:"user",text:msg}]);setLoading(true);
     try{
       const hist=msgs.slice(-8).map(m=>({role:m.role==="assistant"?"assistant":"user",content:m.text}));
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,system:ctx(),messages:[...hist,{role:"user",content:msg}]})});
+      if(!CLAUDE_API_KEY){setMsgs(m=>[...m,{role:"assistant",text:"API key not configured. Set CLAUDE_API_KEY at the top of the file."}]);setLoading(false);return;}
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":CLAUDE_API_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,system:ctx(),messages:[...hist,{role:"user",content:msg}]})});
       const d=await res.json();
       setMsgs(m=>[...m,{role:"assistant",text:d.content?.map(c=>c.text||"").join("")||"No response."}]);
     }catch{setMsgs(m=>[...m,{role:"assistant",text:"Connection error. Try again."}]);}
@@ -356,10 +382,66 @@ function ChatBot({analysis,metPlan,cfg,onClose}){
         <div ref={endRef}/>
       </div>
       {msgs.length<=1&&<div style={{padding:"4px 10px 6px",display:"flex",gap:5,flexWrap:"wrap"}}>{QUICK.map((q,i)=><button key={i} onClick={()=>setInput(q)} style={{background:C.accentLt,color:C.accent,border:"1px solid #bfdbfe",borderRadius:18,padding:"3px 10px",fontSize:11,fontWeight:600,cursor:"pointer"}}>{q}</button>)}</div>}
-      
+      <div style={{padding:"8px 10px",borderTop:"1px solid #dde3ed",display:"flex",gap:7,flexShrink:0}}>
+        <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()}
+          placeholder="Ask about your plan…" style={{...inp({fontSize:13,minHeight:36,flex:1,borderRadius:20,padding:"8px 14px"})}}/>
+        <button onClick={send} disabled={loading||!input.trim()} style={{...btn(C.navy,"#fff",{borderRadius:20,padding:"8px 14px",minHeight:36,fontSize:13})}}>Send</button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REGISTER SCREEN
+// ─────────────────────────────────────────────────────────────────────────────
+function RegisterScreen({onDone}){
+  const [step,setStep]=useState(1);
+  const [form,setForm]=useState({name:"",phone:"",company:"",password:"",confirm:""});
+  const [err,setErr]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [facePhoto,setFacePhoto]=useState(null);
+  const [camOn,setCamOn]=useState(false);
+  const videoRef=useRef(null);
+  const canvasRef=useRef(null);
+  const streamRef=useRef(null);
+  const upd=(k,v)=>setForm(f=>({...f,[k]:v}));
+
+  const startCam=async()=>{
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:320,height:320}});
+      streamRef.current=stream;
+      if(videoRef.current){videoRef.current.srcObject=stream;}
+      setCamOn(true);
+    }catch(e){setErr("Camera access denied: "+e.message);}
+  };
+  const stopCam=()=>{
+    if(streamRef.current){streamRef.current.getTracks().forEach(t=>t.stop());}
+    setCamOn(false);
+  };
+  const snap=()=>{
+    const canvas=canvasRef.current,video=videoRef.current;
+    if(!canvas||!video)return;
+    canvas.width=320;canvas.height=320;
+    canvas.getContext("2d").drawImage(video,0,0,320,320);
+    setFacePhoto(canvas.toDataURL("image/jpeg",0.7));
+    stopCam();
+  };
+  const submit=async()=>{
+    setLoading(true);setErr("");
+    try{
+      if(typeof fbRegister==="function"){
+        await fbRegister(form.name,form.phone.replace(/\D/g,""),form.company,form.password,facePhoto);
+      }
+      setStep(3);
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  if(step===3) return(
+    <div style={{textAlign:"center",padding:"10px 0"}}>
       <div style={{fontSize:20,fontWeight:800,color:C.navy,marginBottom:6}}>Registration Complete!</div>
       <div style={{fontSize:13,color:C.textMd,marginBottom:4,lineHeight:1.6}}>Your <strong>30-day free trial</strong> has started.<br/>Login with your phone number and password.</div>
-      <button onClick={onDone} style={{...btn(C.navy,"#fff",{padding:"11px 30px",fontSize:14,marginTop:16})}}>Go to Login →</button>
+      <button onClick={onDone} style={{...btn(C.navy,"#fff",{padding:"11px 30px",fontSize:14,marginTop:16})}}>Go to Login</button>
     </div>
   );
 
@@ -399,7 +481,7 @@ function ChatBot({analysis,metPlan,cfg,onClose}){
             if(form.password!==form.confirm){setErr("Passwords do not match.");return;}
             setErr("");setStep(2);
           }} style={{...btn(C.navy,"#fff",{width:"100%",padding:"12px",fontSize:14,marginTop:4})}}>
-            Next: Take Face Photo →
+            Next: Take Face Photo
           </button>
         </div>
       )}
@@ -722,7 +804,7 @@ function ErrBox({msg}){
 // ─────────────────────────────────────────────────────────────────────────────
 // LOGIN SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
-function LoginScreen({onLogin, installable, onInstall}){
+function LoginScreen({onLogin}){
   const [tab,setTab]=useState("login");
   const [phone,setPhone]=useState("");
   const [password,setPassword]=useState("");
@@ -743,7 +825,7 @@ function LoginScreen({onLogin, installable, onInstall}){
     setErr("");setLoading(true);
     await new Promise(r=>setTimeout(r,400));
     try{
-      if((phone.trim().toLowerCase()==="admin"||phone.replace(/\D/g,"")==="8929397949")&&password===ADMIN_USER.password){
+      if(phone.trim().toLowerCase()==="admin"&&checkAdminPw(password)){
         onLogin(ADMIN_USER);return;
       }
       const user=await fbLogin(phone,password);
@@ -823,7 +905,7 @@ function LoginScreen({onLogin, installable, onInstall}){
                 </button>
               </div>
               {installable&&(
-                <button onClick={onInstall} style={{width:"100%",marginTop:12,padding:"11px",background:"linear-gradient(135deg,#0f1e3a,#1a305c)",color:"#fbbf24",border:"2px solid rgba(251,191,36,.6)",borderRadius:10,fontWeight:800,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8,fontFamily:"inherit"}}>
+                <button onClick={installPWA} style={{width:"100%",marginTop:12,padding:"11px",background:"linear-gradient(135deg,#0f1e3a,#1a305c)",color:"#fbbf24",border:"2px solid rgba(251,191,36,.6)",borderRadius:10,fontWeight:800,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8,fontFamily:"inherit"}}>
                   📲 Install Plan Power App
                 </button>
               )}
@@ -1863,11 +1945,24 @@ function App(){
   const logout=()=>{setUser(null);setData({pen:[],mj:[],fgjm:[],bare:[]});setMetPlan([]);setTab("upload");showToast("Signed out");};
   const installApp=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();const{outcome}=await deferredPrompt.userChoice;setDP(null);setInstallable(false);if(outcome==="accepted")showToast("Installing…");};
 
+  const REQUIRED_COLS={
+    pen:["Material","Width","Pending Rolls"],
+    bare:["Material","Width","Batch"],
+    mj:["Material","Width"],
+    fgjm:["Material","Width"],
+  };
+  const validateUpload=(k,rows)=>{
+    if(!rows||rows.length===0) throw new Error("File is empty or has no data rows.");
+    const req=REQUIRED_COLS[k]||[];
+    const cols=Object.keys(rows[0]||{});
+    const missing=req.filter(c=>!cols.some(col=>col.trim()===c));
+    if(missing.length>0) throw new Error(`Missing required columns: ${missing.join(", ")}. Found: ${cols.slice(0,8).join(", ")}${cols.length>8?"...":""}`);
+  };
   const upload=async(k,file)=>{
     if(user?.role==="viewer"){showToast("View-only account");return;}
     setBusy(k);
-    try{setData(d=>({...d,[k]:[]}));const parsed=await readXL(file);setData(d=>({...d,[k]:parsed}));showToast(`${k.toUpperCase()}: ${parsed.length} rows`);}
-    catch(e){alert("Read error: "+e.message);}
+    try{setData(d=>({...d,[k]:[]}));const parsed=await readXL(file);validateUpload(k,parsed);setData(d=>({...d,[k]:parsed}));showToast(`${k.toUpperCase()}: ${parsed.length} rows`);}
+    catch(e){alert("Upload error: "+e.message);}
     setBusy("");
   };
 
